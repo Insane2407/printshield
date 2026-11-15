@@ -247,8 +247,20 @@ export const NewJobModal: React.FC = () => {
         printerId: 'prt-01',
       });
 
+      // Generate initial 5-minute single-use QR token
+      try {
+        const qrRes = await api.jobs.generateQR(uploadedJob.jobCode, { expirySeconds: 300 });
+        setConfirmedSettings({
+          ...res.settings,
+          qr_payload: qrRes.qr_payload,
+          release_pin: qrRes.manual_code,
+          expires_at: qrRes.expires_at,
+        });
+      } catch {
+        setConfirmedSettings(res.settings);
+      }
+
       setIsSubmittingConfig(false);
-      setConfirmedSettings(res.settings);
       setStep('CONFIRMED');
       await refreshData();
       addToast(
@@ -843,6 +855,17 @@ export const NewJobModal: React.FC = () => {
             pin={confirmedSettings.release_pin}
             jobCode={confirmedSettings.job_id}
             documentName={confirmedSettings.original_filename}
+            expiresAt={confirmedSettings.expires_at}
+            initialSecondsRemaining={300}
+            onRegenerate={async () => {
+              const fresh = await api.jobs.generateQR(confirmedSettings.job_id, { expirySeconds: 300 });
+              setConfirmedSettings({
+                ...confirmedSettings,
+                qr_payload: fresh.qr_payload,
+                release_pin: fresh.manual_code,
+                expires_at: fresh.expires_at,
+              });
+            }}
             size={180}
             className="w-full"
           />

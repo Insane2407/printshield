@@ -26,6 +26,11 @@ class Settings:
     MAX_FILE_SIZE_BYTES: int = int(os.getenv("MAX_FILE_SIZE_BYTES", str(25 * 1024 * 1024))) # 25 MB
     ALLOWED_EXTENSIONS: set = {"pdf"}
 
+    # Retention Policy
+    RETENTION_MODE: str = os.getenv("RETENTION_MODE", "ZERO_RETENTION_IMMEDIATE") # IMMEDIATE | EXPIRE_ONLY
+    JOB_EXPIRATION_DEFAULT_MINUTES: int = int(os.getenv("JOB_EXPIRATION_DEFAULT_MINUTES", "60"))
+    CLEANUP_DOD_WIPE: bool = True
+
     # Master Key (for encrypting keys in key store)
     MASTER_KEY_HEX: str = os.getenv(
         "MASTER_KEY_HEX",

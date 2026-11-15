@@ -43,12 +43,61 @@ def ensure_schema_migrations(engine):
                 ("station_id", "VARCHAR(64) DEFAULT 'TERM-CYBERHUB-04' NOT NULL"),
                 ("printer_id", "VARCHAR(64) DEFAULT 'prt-01'"),
                 ("shredded_at", "DATETIME"),
-                ("shredding_hash", "VARCHAR(128)")
+                ("shredding_hash", "VARCHAR(128)"),
+                ("cleanup_status", "VARCHAR(32) DEFAULT 'PENDING' NOT NULL"),
+                ("cleanup_timestamp", "DATETIME"),
+                ("cleanup_details", "TEXT")
             ]
             
             for col_name, col_def in columns_to_add:
                 if col_name not in existing_cols:
                     conn.execute(text(f"ALTER TABLE print_jobs ADD COLUMN {col_name} {col_def};"))
+
+            # Ensure one_time_tokens table exists
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS one_time_tokens (
+                    token_id VARCHAR(64) PRIMARY KEY,
+                    token_hash VARCHAR(64) UNIQUE NOT NULL,
+                    manual_code_hash VARCHAR(64) NOT NULL,
+                    manual_code VARCHAR(16) NOT NULL,
+                    job_id VARCHAR(64) NOT NULL,
+                    station_id VARCHAR(64) NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    redeemed_at DATETIME,
+                    is_used BOOLEAN NOT NULL DEFAULT 0
+                );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_one_time_tokens_token_hash ON one_time_tokens (token_hash);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_one_time_tokens_manual_code_hash ON one_time_tokens (manual_code_hash);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_one_time_tokens_job_id ON one_time_tokens (job_id);"))
+
+            # Ensure cleanup_reports table exists
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS cleanup_reports (
+                    report_id VARCHAR(64) PRIMARY KEY,
+                    job_id VARCHAR(64) NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+                    trigger_reason VARCHAR(64) NOT NULL DEFAULT 'PRINT_COMPLETED',
+                    initiated_at DATETIME NOT NULL,
+                    completed_at DATETIME,
+                    server_encrypted_file_deleted BOOLEAN NOT NULL DEFAULT 0,
+                    server_encrypted_file_path VARCHAR(512),
+                    server_key_file_deleted BOOLEAN NOT NULL DEFAULT 0,
+                    server_key_file_path VARCHAR(512),
+                    server_tokens_invalidated_count INTEGER NOT NULL DEFAULT 0,
+                    station_decrypted_file_deleted BOOLEAN NOT NULL DEFAULT 0,
+                    station_decrypted_file_path VARCHAR(512),
+                    station_temp_files_deleted_count INTEGER NOT NULL DEFAULT 0,
+                    station_job_data_cleared BOOLEAN NOT NULL DEFAULT 0,
+                    deleted_items_count INTEGER NOT NULL DEFAULT 0,
+                    failed_items_count INTEGER NOT NULL DEFAULT 0,
+                    errors_json TEXT,
+                    summary TEXT
+                );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cleanup_reports_job_id ON cleanup_reports (job_id);"))
+
             conn.commit()
     except Exception as e:
         print(f"[Warning] Auto-migration check: {e}")

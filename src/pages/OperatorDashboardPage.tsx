@@ -7,8 +7,10 @@ import { Card, CardHeader, CardContent } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { StatCard } from '../components/common/StatCard';
+import { CleanupReportModal } from '../components/common/CleanupReportModal';
 import { sampleStationStatus } from '../data/sampleData';
 import { formatTimestamp, truncateHash } from '../lib/utils';
+import { api } from '../services/api';
 import { 
   Terminal, 
   Printer, 
@@ -21,7 +23,9 @@ import {
   FileCheck2, 
   FileText,
   Activity,
-  HardDrive
+  HardDrive,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { PrintJob } from '../types';
 
@@ -36,6 +40,34 @@ export const OperatorDashboardPage: React.FC = () => {
   const [verifiedJob, setVerifiedJob] = useState<PrintJob | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [selectedReportJob, setSelectedReportJob] = useState<{ id: string; name: string } | null>(null);
+  const [sweeping, setSweeping] = useState(false);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
+
+  const handleSweepExpired = async () => {
+    setSweeping(true);
+    try {
+      const res = await api.jobs.sweepExpired();
+      addToast('success', 'Retention Sweep Executed', res.message || 'Expired jobs cleaned.');
+    } catch (err: any) {
+      addToast('error', 'Sweep Failed', err.message);
+    } finally {
+      setSweeping(false);
+    }
+  };
+
+  const handleOperatorRetryCleanup = async (jobCode: string) => {
+    setRetryingJobId(jobCode);
+    try {
+      const rep = await api.jobs.retryCleanup(jobCode, 'OPERATOR_MANUAL_RETRY');
+      addToast('success', 'Zero-Retention Cleanup Executed', `Job ${jobCode} status: ${rep.status}`);
+      setSelectedReportJob({ id: jobCode, name: jobCode });
+    } catch (err: any) {
+      addToast('error', 'Cleanup Retry Failed', err.message);
+    } finally {
+      setRetryingJobId(null);
+    }
+  };
 
   // Computed collections matching prompt:
   // - Incoming print jobs
@@ -304,36 +336,71 @@ export const OperatorDashboardPage: React.FC = () => {
           <Card>
             <CardHeader
               title={
-                <div className="flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-purple-400" />
-                  <span>DoD 5220.22-M Cleanup Reports</span>
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <Flame className="w-4 h-4 text-purple-400" />
+                    <span>DoD 5220.22-M Cleanup Reports</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-[11px] font-mono py-1 px-2"
+                    onClick={handleSweepExpired}
+                    loading={sweeping}
+                    leftIcon={<RefreshCw className={`w-3 h-3 ${sweeping ? 'animate-spin' : ''}`} />}
+                  >
+                    Run Expiry Sweep
+                  </Button>
                 </div>
               }
-              subtitle="Tamper-proof certificates confirming 3-pass zero overwrite of printer RAM"
+              subtitle="Tamper-proof certificates confirming physical deletion and 3-pass zero overwrite"
             />
             <CardContent className="space-y-3">
-              {cleanupReports.map((job) => (
-                <div key={job.id} className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-500/30 text-xs font-mono space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="font-bold text-white font-sans">{job.documentName} ({job.jobCode})</div>
-                    <span className="text-purple-300 font-bold bg-purple-950 px-2 py-0.5 rounded border border-purple-500/40 text-[10px]">
-                      SANID: 3-PASS ZERO
-                    </span>
-                  </div>
-                  <div className="text-slate-400 text-[11px]">
-                    Shred Certificate Hash: <code className="text-purple-300 font-mono break-all">{job.shreddingHash || 'SHRED-CERT-ba7816bf8f01cfea414140de5dae2223b00361a3'}</code>
-                  </div>
-                  <div className="flex justify-between items-center text-[10px] text-slate-500 pt-1 border-t border-purple-500/20">
-                    <span>Sanitized At: {formatTimestamp(job.shreddedAt || job.createdAt)}</span>
-                    <button
-                      onClick={() => navigate(`/operator/receipt/rcpt-${job.id.replace('job-', '')}`)}
-                      className="text-cyan-400 hover:underline"
-                    >
-                      View Signed Receipt &rarr;
-                    </button>
-                  </div>
+              {cleanupReports.length === 0 ? (
+                <div className="py-6 text-center text-xs font-mono text-slate-500">
+                  No completed cleanup reports yet. Cleanups execute automatically upon print success or job expiration.
                 </div>
-              ))}
+              ) : (
+                cleanupReports.map((job) => (
+                  <div key={job.id} className="p-3.5 rounded-xl bg-purple-950/20 border border-purple-500/30 text-xs font-mono space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-white font-sans">{job.documentName} ({job.jobCode})</div>
+                      <Badge cleanupStatus={job.cleanupStatus} size="sm" />
+                    </div>
+                    <div className="text-slate-400 text-[11px]">
+                      Shred Certificate Hash: <code className="text-purple-300 font-mono break-all">{job.shreddingHash || 'SHRED-CERT-ba7816bf8f01cfea414140de5dae2223b00361a3'}</code>
+                    </div>
+                    <div className="flex flex-wrap justify-between items-center gap-2 text-[10px] text-slate-500 pt-2 border-t border-purple-500/20">
+                      <span>Sanitized At: {formatTimestamp(job.cleanupTimestamp || job.shreddedAt || job.createdAt)}</span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setSelectedReportJob({ id: job.jobCode, name: job.documentName })}
+                          className="text-purple-400 hover:text-purple-300 hover:underline flex items-center gap-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Audit Report</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleOperatorRetryCleanup(job.jobCode)}
+                          disabled={retryingJobId === job.jobCode}
+                          className="text-amber-400 hover:text-amber-300 hover:underline flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3 h-3 ${retryingJobId === job.jobCode ? 'animate-spin' : ''}`} />
+                          <span>Retry</span>
+                        </button>
+
+                        <button
+                          onClick={() => navigate(`/operator/receipt/rcpt-${job.id.replace('job-', '')}`)}
+                          className="text-cyan-400 hover:underline"
+                        >
+                          Receipt &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </CardContent>
           </Card>
         </div>
@@ -407,7 +474,7 @@ export const OperatorDashboardPage: React.FC = () => {
                     <div>Cost: <strong className="text-emerald-400">${verifiedJob.totalCost.toFixed(2)}</strong></div>
                   </div>
 
-                  {verifiedJob.status === 'ready' || verifiedJob.status === 'queued' ? (
+                  {verifiedJob.status === 'ready' || verifiedJob.status === 'queued' || verifiedJob.status === 'authorized' || verifiedJob.status === 'pending' ? (
                     <Button
                       size="sm"
                       variant="primary"
@@ -497,6 +564,16 @@ export const OperatorDashboardPage: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Verified Zero-Retention Cleanup Audit Report Modal */}
+      {selectedReportJob && (
+        <CleanupReportModal
+          isOpen={!!selectedReportJob}
+          onClose={() => setSelectedReportJob(null)}
+          jobId={selectedReportJob.id}
+          documentName={selectedReportJob.name}
+        />
+      )}
     </OperatorLayout>
   );
 };

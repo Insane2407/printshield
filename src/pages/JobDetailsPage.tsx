@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useJobs } from '../context/JobContext';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 import { CustomerLayout } from '../components/layout/CustomerLayout';
 import { OperatorLayout } from '../components/layout/OperatorLayout';
 import { Card, CardHeader, CardContent } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { QRCodeCard } from '../components/common/QRCodeCard';
+import { CleanupReportModal } from '../components/common/CleanupReportModal';
 import { formatBytes, formatTimestamp, truncateHash } from '../lib/utils';
 import { 
   FileText, 
@@ -18,18 +20,63 @@ import {
   ArrowLeft, 
   Receipt as ReceiptIcon, 
   ShieldCheck,
-  QrCode
+  QrCode,
+  Trash2,
+  RefreshCw,
+  CheckCircle2,
+  Server,
+  Monitor
 } from 'lucide-react';
 
 export const JobDetailsPage: React.FC = () => {
   const { jobId } = useParams<{ jobId: string }>();
   const navigate = useNavigate();
-  const { jobs, cancelJob } = useJobs();
+  const { jobs, cancelJob, addToast } = useJobs();
   const { role } = useAuth();
 
   const currentJob = jobs.find(j => j.id === jobId || j.jobCode === jobId) || jobs[0];
 
   const [copiedHash, setCopiedHash] = useState(false);
+  const [isCleanupModalOpen, setIsCleanupModalOpen] = useState(false);
+  const [isRetryingCleanup, setIsRetryingCleanup] = useState(false);
+  const [tokenData, setTokenData] = useState<{
+    qrPayload?: string;
+    pin?: string;
+    expiresAt?: string;
+    isUsed?: boolean;
+    secondsRemaining?: number;
+  }>({});
+
+  const handleManualCleanupRetry = async () => {
+    if (!currentJob) return;
+    setIsRetryingCleanup(true);
+    try {
+      const rep = await api.jobs.retryCleanup(currentJob.jobCode, 'MANUAL_RETRY');
+      addToast('success', 'Cleanup Executed', `Zero-Retention cleanup status: ${rep.status}`);
+      setIsCleanupModalOpen(true);
+    } catch (err: any) {
+      addToast('error', 'Cleanup Retry Failed', err.message);
+    } finally {
+      setIsRetryingCleanup(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    if (!currentJob) return;
+    try {
+      const res = await api.jobs.generateQR(currentJob.jobCode, { expirySeconds: 300 });
+      setTokenData({
+        qrPayload: res.qr_payload,
+        pin: res.manual_code,
+        expiresAt: res.expires_at,
+        isUsed: false,
+        secondsRemaining: res.expiry_seconds
+      });
+      addToast('success', 'Token Refreshed', 'Fresh 5-minute QR code generated.');
+    } catch (err: any) {
+      addToast('error', 'Token Generation Failed', err.message);
+    }
+  };
 
   const LayoutComponent = role === 'operator' ? OperatorLayout : CustomerLayout;
   const backRoute = role === 'operator' ? '/operator' : '/customer';
@@ -115,6 +162,7 @@ export const JobDetailsPage: React.FC = () => {
 
         <div className="flex items-center gap-3">
           <Badge status={currentJob.status} size="lg" />
+          <Badge cleanupStatus={currentJob.cleanupStatus} size="lg" />
         </div>
       </div>
 
@@ -249,6 +297,84 @@ export const JobDetailsPage: React.FC = () => {
             </CardContent>
           </Card>
 
+          {/* Zero-Retention Cleanup Audit & Destruction Report */}
+          <Card glow className="border-purple-500/30">
+            <CardHeader
+              title={
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="w-4 h-4 text-purple-400" />
+                    <span>Zero-Retention File Cleanup Audit</span>
+                  </div>
+                  <Badge cleanupStatus={currentJob.cleanupStatus} size="sm" />
+                </div>
+              }
+              subtitle="Verifiable destruction of PrintShield-managed encrypted files, keys, and tokens"
+            />
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
+                <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800">
+                  <div className="flex items-center gap-1.5 text-cyan-300 font-bold mb-1">
+                    <Server className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Server Storage Vault</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Encrypted ciphertext blob and master-wrapped AES-256 key envelope.
+                  </p>
+                  <div className="mt-2 text-[10px] text-emerald-400 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>{currentJob.cleanupStatus === 'completed' || currentJob.cleanupStatus === 'verified_dod' ? 'Verified Absent & Overwritten' : 'Awaiting Purge Trigger'}</span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800">
+                  <div className="flex items-center gap-1.5 text-purple-300 font-bold mb-1">
+                    <Monitor className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Print Station Cache</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Temporary decrypted PDF and in-memory spooler stream.
+                  </p>
+                  <div className="mt-2 text-[10px] text-purple-400 font-bold flex items-center gap-1">
+                    <Flame className="w-3 h-3" />
+                    <span>{currentJob.cleanupStatus === 'completed' || currentJob.cleanupStatus === 'verified_dod' ? 'DoD 5220.22-M 3-Pass Overwritten' : 'Protected in RAM'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {currentJob.cleanupTimestamp && (
+                <div className="text-[11px] font-mono text-slate-400 flex justify-between items-center px-1">
+                  <span>Sanitization Timestamp:</span>
+                  <span className="text-white font-bold">{formatTimestamp(currentJob.cleanupTimestamp)}</span>
+                </div>
+              )}
+
+              {/* Action Buttons: View Full Report & Manual Retry */}
+              <div className="pt-2 flex flex-wrap items-center gap-2 border-t border-slate-800/80">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-xs font-mono"
+                  onClick={() => setIsCleanupModalOpen(true)}
+                  leftIcon={<Trash2 className="w-3.5 h-3.5 text-purple-400" />}
+                >
+                  View Full Cleanup Report
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="text-xs font-mono"
+                  onClick={handleManualCleanupRetry}
+                  loading={isRetryingCleanup}
+                  leftIcon={<RefreshCw className={`w-3.5 h-3.5 ${isRetryingCleanup ? 'animate-spin' : ''}`} />}
+                >
+                  Manual Cleanup Retry
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Required: Job Status Timeline */}
           <Card>
             <CardHeader
@@ -288,11 +414,14 @@ export const JobDetailsPage: React.FC = () => {
         {/* Right 1 Col: Required QR Code Display */}
         <div className="space-y-6">
           <QRCodeCard
-            value={currentJob.qrPayload}
-            pin={currentJob.releasePin}
+            value={tokenData.qrPayload || currentJob.qrPayload}
+            pin={tokenData.pin || currentJob.releasePin}
             jobCode={currentJob.jobCode}
             documentName={currentJob.documentName}
-            expiresAt={currentJob.expiresAt}
+            expiresAt={tokenData.expiresAt || currentJob.expiresAt}
+            initialSecondsRemaining={tokenData.secondsRemaining || 300}
+            isUsed={tokenData.isUsed || currentJob.status === 'completed' || currentJob.status === 'shredded'}
+            onRegenerate={handleRegenerate}
             size={180}
             className="w-full"
           />
@@ -309,6 +438,16 @@ export const JobDetailsPage: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Verified Zero-Retention Cleanup Report Modal */}
+      {currentJob && (
+        <CleanupReportModal
+          isOpen={isCleanupModalOpen}
+          onClose={() => setIsCleanupModalOpen(false)}
+          jobId={currentJob.jobCode}
+          documentName={currentJob.documentName}
+        />
+      )}
     </LayoutComponent>
   );
 };

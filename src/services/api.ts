@@ -1,4 +1,4 @@
-import { PrintJob, Receipt, User, PrinterDevice } from '../types';
+import { PrintJob, Receipt, User, PrinterDevice, CleanupReport } from '../types';
 import { 
   currentUserCustomer, 
   currentUserOperator, 
@@ -50,6 +50,9 @@ export interface BackendJobRecord {
   expires_at?: string;
   shredded_at?: string | null;
   shredding_hash?: string | null;
+  cleanup_status?: string;
+  cleanup_timestamp?: string | null;
+  cleanup_details?: string | null;
 }
 
 export interface BackendUploadResponse {
@@ -107,6 +110,61 @@ export interface ConfigureResponse {
   settings: PrintSettingsResponse;
 }
 
+export interface GenerateQRRequestPayload {
+  customerId?: string;
+  expirySeconds?: number;
+  stationId?: string;
+}
+
+export interface GenerateQRResponse {
+  success: boolean;
+  message: string;
+  job_id: string;
+  raw_token: string;
+  manual_code: string;
+  qr_payload: string;
+  created_at: string;
+  expires_at: string;
+  expiry_seconds: number;
+  station_id: string;
+}
+
+export interface RedeemTokenRequestPayload {
+  stationId: string;
+  token?: string;
+  manualCode?: string;
+  qrPayload?: string;
+}
+
+export interface RedeemTokenResponse {
+  success: boolean;
+  message: string;
+  job_id: string;
+  job_status: string;
+  redeemed_at: string;
+  station_id: string;
+  document_name: string;
+  total_pages: number;
+  copies: number;
+  total_sheets: number;
+  color_mode: string;
+  total_cost: number;
+}
+
+export interface QRStatusResponse {
+  job_id: string;
+  job_status: string;
+  has_active_token: boolean;
+  is_used: boolean;
+  is_expired: boolean;
+  seconds_remaining: number;
+  created_at?: string | null;
+  expires_at?: string | null;
+  redeemed_at?: string | null;
+  station_id?: string | null;
+  manual_code?: string | null;
+}
+
 // Convert FastAPI backend record to React frontend PrintJob model
 export function transformBackendJob(record: BackendJobRecord): PrintJob {
   const pages = record.total_document_pages || record.page_count || 1;
@@ -142,7 +200,9 @@ export function transformBackendJob(record: BackendJobRecord): PrintJob {
     ratePerPage: rate,
     totalCost: cost,
     status: record.job_status.toLowerCase() as any,
-    cleanupStatus: record.shredding_hash ? 'verified_dod' : 'pending',
+    cleanupStatus: (record.cleanup_status?.toLowerCase() as any) || (record.shredding_hash ? 'completed' : 'pending'),
+    cleanupTimestamp: record.cleanup_timestamp || undefined,
+    cleanupDetails: record.cleanup_details || undefined,
     encryptionScheme: 'AES-256-GCM + Client Ephemeral Key',
     clientHashSha256: record.document_hash,
     serverEnvelopeCipher: `ECDH-P256-AES256GCM-${record.job_id}`,
@@ -343,6 +403,62 @@ export const api = {
       return await response.json();
     },
 
+    /**
+     * Generate fresh One-Time QR Token (default: 5 min TTL)
+     */
+    async generateQR(jobId: string, options?: GenerateQRRequestPayload): Promise<GenerateQRResponse> {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/generate-qr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_id: options?.customerId || 'usr-cst-9021',
+          expiry_seconds: options?.expirySeconds || 300,
+          station_id: options?.stationId || 'TERM-CYBERHUB-04'
+        })
+      });
+
+      if (!response.ok) {
+        let errorMsg = `Server error ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail) errorMsg = errData.detail;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
+      const res: GenerateQRResponse = await response.json();
+
+      // Update local memory cache with new active token and PIN
+      const memIdx = memoryJobs.findIndex(j => j.id === jobId.toLowerCase() || j.jobCode === jobId);
+      if (memIdx !== -1) {
+        memoryJobs[memIdx] = {
+          ...memoryJobs[memIdx],
+          qrPayload: res.qr_payload,
+          releasePin: res.manual_code,
+          expiresAt: res.expires_at,
+          terminalId: res.station_id
+        };
+      }
+
+      return res;
+    },
+
+    /**
+     * Query live QR redemption and countdown status
+     */
+    async getQRStatus(jobId: string): Promise<QRStatusResponse> {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/qr-status`);
+      if (!response.ok) {
+        let errorMsg = `Server error ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail) errorMsg = errData.detail;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+      return await response.json();
+    },
+
     async create(payload: CreateJobPayload): Promise<PrintJob> {
       const randomNum = Math.floor(1000 + Math.random() * 9000);
       const pinPart1 = Math.floor(100 + Math.random() * 900);
@@ -431,6 +547,47 @@ export const api = {
       return await res.json();
     },
 
+    async getCleanupReport(jobId: string): Promise<CleanupReport> {
+      const cleanId = jobId.toUpperCase();
+      const res = await fetch(`${API_BASE_URL}/jobs/${cleanId}/cleanup-report`);
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const err = await res.json();
+          if (err.detail) msg = err.detail;
+        } catch {}
+        throw new Error(msg);
+      }
+      return await res.json();
+    },
+
+    async retryCleanup(jobId: string, reason: string = 'MANUAL_RETRY'): Promise<CleanupReport> {
+      const cleanId = jobId.toUpperCase();
+      const res = await fetch(`${API_BASE_URL}/jobs/${cleanId}/cleanup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const err = await res.json();
+          if (err.detail) msg = err.detail;
+        } catch {}
+        throw new Error(msg);
+      }
+      return await res.json();
+    },
+
+    async sweepExpired(): Promise<any> {
+      const res = await fetch(`${API_BASE_URL}/cleanup/sweep-expired`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    },
+
     async cancel(id: string): Promise<PrintJob | null> {
       const idx = memoryJobs.findIndex(j => j.id === id);
       if (idx === -1) return null;
@@ -445,18 +602,81 @@ export const api = {
     }
   },
 
+  // Print Station Kiosk Endpoints
+  station: {
+    async redeem(payload: RedeemTokenRequestPayload): Promise<RedeemTokenResponse> {
+      const response = await fetch(`${API_BASE_URL}/station/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          station_id: payload.stationId || 'TERM-CYBERHUB-04',
+          token: payload.token,
+          manual_code: payload.manualCode,
+          qr_payload: payload.qrPayload,
+        })
+      });
+
+      if (!response.ok) {
+        let errorMsg = `Server error ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail) errorMsg = errData.detail;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
+      const data: RedeemTokenResponse = await response.json();
+
+      // Update memory cache status
+      const memIdx = memoryJobs.findIndex(j => j.id === data.job_id.toLowerCase() || j.jobCode === data.job_id);
+      if (memIdx !== -1) {
+        memoryJobs[memIdx] = {
+          ...memoryJobs[memIdx],
+          status: 'authorized',
+          terminalId: data.station_id,
+        };
+      }
+
+      return data;
+    }
+  },
+
   // Operator Actions
   operator: {
-    async verifyPin(pin: string): Promise<{ valid: boolean; job?: PrintJob; message?: string }> {
-      const normalized = pin.trim().replace(/\s+/g, '');
-      const job = memoryJobs.find(j => 
-        j.releasePin.replace('-', '') === normalized.replace('-', '') ||
-        j.jobCode.toLowerCase() === normalized.toLowerCase()
-      );
-      if (!job) {
-        return { valid: false, message: 'Invalid or expired Release Token. Verification failed.' };
+    async verifyPin(pin: string, stationId: string = 'TERM-CYBERHUB-04'): Promise<{ valid: boolean; job?: PrintJob; message?: string }> {
+      try {
+        const redeemRes = await api.station.redeem({
+          stationId,
+          manualCode: pin,
+          qrPayload: pin.startsWith('printshield://') ? pin : undefined
+        });
+
+        // Retrieve full job
+        let job = await api.jobs.getById(redeemRes.job_id);
+        if (!job) {
+          const mem = memoryJobs.find(j => j.id === redeemRes.job_id.toLowerCase() || j.jobCode === redeemRes.job_id);
+          if (mem) {
+            mem.status = 'authorized';
+            job = mem;
+          }
+        }
+        return { valid: true, job: job || undefined, message: redeemRes.message };
+      } catch (err: any) {
+        // Fallback to local memory verification if backend offline
+        const normalized = pin.trim().replace(/\s+/g, '');
+        const job = memoryJobs.find(j => 
+          j.releasePin.replace('-', '') === normalized.replace('-', '') ||
+          j.jobCode.toLowerCase() === normalized.toLowerCase()
+        );
+        if (!job) {
+          return { valid: false, message: err.message || 'Invalid or expired Release Token. Verification failed.' };
+        }
+        if (err.message && (err.message.includes('expired') || err.message.includes('redeemed') || err.message.includes('policy'))) {
+          return { valid: false, message: err.message };
+        }
+        job.status = 'authorized';
+        return { valid: true, job, message: 'Token authenticated from local memory.' };
       }
-      return { valid: true, job };
     },
     async releaseAndPrint(jobId: string, printerId?: string): Promise<PrintJob> {
       const idx = memoryJobs.findIndex(j => j.id === jobId);

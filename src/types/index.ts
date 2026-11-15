@@ -23,7 +23,44 @@ export type JobStatus =
   | 'shredded'    // DoD 5220.22-M memory sanitization complete
   | 'expired';    // Token expired before presentation
 
-export type CleanupStatus = 'pending' | 'in_progress' | 'verified_dod' | 'purged';
+export type CleanupStatus = 
+  | 'pending'
+  | 'cleaning'
+  | 'in_progress'
+  | 'completed'
+  | 'partially_completed'
+  | 'failed'
+  | 'verified_dod'
+  | 'purged';
+
+export interface CleanupReport {
+  success: boolean;
+  message: string;
+  report_id: string;
+  job_id: string;
+  status: 'pending' | 'cleaning' | 'completed' | 'partially_completed' | 'failed';
+  trigger_reason: string;
+  initiated_at: string;
+  completed_at?: string;
+  server: {
+    encrypted_file_deleted: boolean;
+    encrypted_file_path?: string;
+    key_file_deleted: boolean;
+    key_file_path?: string;
+    tokens_invalidated_count: number;
+  };
+  station: {
+    decrypted_file_deleted: boolean;
+    decrypted_file_path?: string;
+    temp_files_deleted_count: number;
+    job_data_cleared: boolean;
+  };
+  deleted_items_count: number;
+  failed_items_count: number;
+  errors: string[];
+  summary: string;
+  shredding_hash?: string;
+}
 
 export interface AuditEvent {
   id: string;
@@ -79,6 +116,8 @@ export interface PrintJob {
   expiresAt: string;
   printedAt?: string;
   shreddedAt?: string;
+  cleanupTimestamp?: string;
+  cleanupDetails?: string;
   
   // Audit Trail
   auditTrail: AuditEvent[];

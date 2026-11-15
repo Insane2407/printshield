@@ -1,9 +1,10 @@
 import React from 'react';
-import { JobStatus } from '../../types';
-import { ShieldCheck, Flame, RefreshCw, Clock, CheckCircle2, AlertTriangle, Lock } from 'lucide-react';
+import { JobStatus, CleanupStatus } from '../../types';
+import { ShieldCheck, Flame, RefreshCw, Clock, CheckCircle2, AlertTriangle, Lock, Trash2 } from 'lucide-react';
 
 interface BadgeProps {
   status?: JobStatus;
+  cleanupStatus?: CleanupStatus;
   variant?: 'cyan' | 'blue' | 'emerald' | 'amber' | 'rose' | 'purple' | 'slate';
   children?: React.ReactNode;
   icon?: boolean;
@@ -13,6 +14,7 @@ interface BadgeProps {
 
 export const Badge: React.FC<BadgeProps> = ({
   status,
+  cleanupStatus,
   variant,
   children,
   icon = true,
@@ -24,6 +26,62 @@ export const Badge: React.FC<BadgeProps> = ({
     md: 'text-xs px-2.5 py-1 gap-1.5',
     lg: 'text-sm px-3 py-1.5 gap-2',
   };
+
+  // If cleanupStatus is provided, format cleanup badge
+  if (cleanupStatus) {
+    switch (cleanupStatus) {
+      case 'completed':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.15)] ${sizeClasses[size]} ${className}`}>
+            {icon && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+            ZERO-RETENTION CLEANED
+          </span>
+        );
+      case 'cleaning':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)] ${sizeClasses[size]} ${className}`}>
+            {icon && <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />}
+            CLEANING IN PROGRESS
+          </span>
+        );
+      case 'partially_completed':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-amber-950/60 border border-amber-500/40 text-amber-300 ${sizeClasses[size]} ${className}`}>
+            {icon && <AlertTriangle className="w-3 h-3 text-amber-400" />}
+            PARTIALLY CLEANED
+          </span>
+        );
+      case 'failed':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-rose-950/60 border border-rose-500/40 text-rose-300 ${sizeClasses[size]} ${className}`}>
+            {icon && <AlertTriangle className="w-3 h-3 text-rose-400" />}
+            CLEANUP FAILED (RETRY)
+          </span>
+        );
+      case 'verified_dod':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-purple-950/70 border border-purple-500/50 text-purple-300 ${sizeClasses[size]} ${className}`}>
+            {icon && <Flame className="w-3 h-3 text-purple-400" />}
+            DOD 5220.22-M WIPE
+          </span>
+        );
+      case 'purged':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-slate-900 border border-slate-700 text-slate-400 ${sizeClasses[size]} ${className}`}>
+            {icon && <Trash2 className="w-3 h-3 text-slate-500" />}
+            PURGED
+          </span>
+        );
+      case 'pending':
+      default:
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-slate-900 border border-slate-700 text-slate-400 ${sizeClasses[size]} ${className}`}>
+            {icon && <Clock className="w-3 h-3 text-slate-500" />}
+            CLEANUP PENDING
+          </span>
+        );
+    }
+  }
 
   // If status is provided, map to security styling
   if (status) {

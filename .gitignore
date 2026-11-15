@@ -25,6 +25,10 @@ backend/venv/
 storage/
 *.enc
 *.key
+station_agent/restricted_temp/*
+!station_agent/restricted_temp/.gitkeep
+station_agent/spool_output/*
+!station_agent/spool_output/.gitkeep
 
 # Editor directories and files
 .vscode/*

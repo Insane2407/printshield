@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useJobs } from '../context/JobContext';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 import { CustomerLayout } from '../components/layout/CustomerLayout';
 import { StatCard } from '../components/common/StatCard';
 import { Card, CardHeader, CardContent } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { Button } from '../components/common/Button';
 import { QRCodeCard } from '../components/common/QRCodeCard';
+import { CleanupReportModal } from '../components/common/CleanupReportModal';
 import { formatTimestamp } from '../lib/utils';
 import { 
   FileText, 
@@ -21,28 +23,75 @@ import {
   QrCode,
   RefreshCw,
   Copy,
-  Check
+  Check,
+  Trash2
 } from 'lucide-react';
 
 export const CustomerDashboardPage: React.FC = () => {
-  const { jobs, openUploadModal, refreshData } = useJobs();
+  const { jobs, openUploadModal, refreshData, addToast } = useJobs();
   const { user } = useAuth();
   const navigate = useNavigate();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [copiedPin, setCopiedPin] = useState<string | null>(null);
+  const [selectedCleanupJob, setSelectedCleanupJob] = useState<{ id: string; name: string } | null>(null);
+
+  // Active QR Token state
+  const [activeTokenData, setActiveTokenData] = useState<{
+    qrPayload: string;
+    pin: string;
+    expiresAt: string;
+    isUsed: boolean;
+    secondsRemaining: number;
+  } | null>(null);
 
   // Computed status metrics matching prompt requirements:
   // - Total print jobs
   // - Pending jobs
   // - Completed jobs
   const totalJobsCount = jobs.length;
-  const pendingJobs = jobs.filter(j => j.status === 'ready' || j.status === 'queued' || j.status === 'printing');
+  const pendingJobs = jobs.filter(j => j.status === 'pending' || j.status === 'ready' || j.status === 'queued' || j.status === 'printing');
   const completedJobs = jobs.filter(j => j.status === 'completed' || j.status === 'shredded');
 
   // Most relevant active job for the Active QR Code section
-  const activeQrJob = pendingJobs.find(j => j.status === 'ready') || pendingJobs[0] || jobs[0];
+  const activeQrJob = pendingJobs.find(j => j.status === 'pending' || j.status === 'ready') || pendingJobs[0] || jobs[0];
+
+  // Generate / Refresh active QR token
+  const handleRegenerateQR = async (jobCode: string) => {
+    try {
+      const res = await api.jobs.generateQR(jobCode, { expirySeconds: 300 });
+      setActiveTokenData({
+        qrPayload: res.qr_payload,
+        pin: res.manual_code,
+        expiresAt: res.expires_at,
+        isUsed: false,
+        secondsRemaining: res.expiry_seconds
+      });
+      addToast('success', 'Fresh QR Code Generated', 'Valid for 5 minutes at CyberHub Kiosk.');
+    } catch (err: any) {
+      addToast('error', 'Token Generation Failed', err.message || 'Could not generate QR token.');
+    }
+  };
+
+  // Poll for redemption when an active QR code is showing
+  useEffect(() => {
+    if (!activeQrJob || activeQrJob.status === 'completed' || activeQrJob.status === 'shredded') return;
+
+    const pollStatus = async () => {
+      try {
+        const status = await api.jobs.getQRStatus(activeQrJob.jobCode);
+        if (status.is_used && !activeTokenData?.isUsed) {
+          setActiveTokenData(prev => prev ? { ...prev, isUsed: true } : null);
+          refreshData();
+          addToast('success', 'Token Redeemed!', `Job ${activeQrJob.jobCode} authorized by kiosk operator.`);
+        }
+      } catch (err) {}
+    };
+
+    const interval = setInterval(pollStatus, 3500);
+    return () => clearInterval(interval);
+  }, [activeQrJob?.jobCode, activeTokenData?.isUsed]);
 
   const filteredJobs = jobs.filter((job) => {
     const matchesSearch = 
@@ -239,6 +288,19 @@ export const CustomerDashboardPage: React.FC = () => {
 
                       <Badge status={job.status} />
 
+                      {/* Cleanup Status Badge & Report Trigger */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedCleanupJob({ id: job.jobCode, name: job.documentName });
+                        }}
+                        title="View Zero-Retention Cleanup Audit Report"
+                        className="p-1 rounded-lg bg-slate-900 border border-slate-700/80 text-purple-400 hover:text-purple-300 hover:border-purple-500/50 transition-colors flex items-center gap-1.5 text-[11px] font-mono"
+                      >
+                        <Badge cleanupStatus={job.cleanupStatus} size="sm" icon={false} />
+                        <Trash2 className="w-3 h-3 text-purple-400" />
+                      </button>
+
                       <div className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors">
                         <ExternalLink className="w-4 h-4" />
                       </div>
@@ -266,11 +328,14 @@ export const CustomerDashboardPage: React.FC = () => {
               {activeQrJob ? (
                 <div className="w-full flex flex-col items-center">
                   <QRCodeCard
-                    value={activeQrJob.qrPayload}
-                    pin={activeQrJob.releasePin}
+                    value={activeTokenData?.qrPayload || activeQrJob.qrPayload}
+                    pin={activeTokenData?.pin || activeQrJob.releasePin}
                     jobCode={activeQrJob.jobCode}
                     documentName={activeQrJob.documentName}
-                    expiresAt={activeQrJob.expiresAt}
+                    expiresAt={activeTokenData?.expiresAt || activeQrJob.expiresAt}
+                    initialSecondsRemaining={activeTokenData?.secondsRemaining || 300}
+                    isUsed={activeTokenData?.isUsed || activeQrJob.status === 'authorized' || activeQrJob.status === 'printing'}
+                    onRegenerate={() => handleRegenerateQR(activeQrJob.jobCode)}
                     size={170}
                     className="w-full"
                   />
@@ -321,6 +386,17 @@ export const CustomerDashboardPage: React.FC = () => {
         </div>
 
       </div>
+
+      {/* Zero-Retention Cleanup Audit Report Modal */}
+      {selectedCleanupJob && (
+        <CleanupReportModal
+          isOpen={!!selectedCleanupJob}
+          onClose={() => setSelectedCleanupJob(null)}
+          jobId={selectedCleanupJob.id}
+          documentName={selectedCleanupJob.name}
+          onCleanupUpdated={refreshData}
+        />
+      )}
     </CustomerLayout>
   );
 };
