@@ -185,4 +185,70 @@ class CleanupReport(Base):
             "summary": self.summary,
         }
 
+class DigitalReceipt(Base):
+    __tablename__ = "digital_receipts"
+
+    receipt_id = Column(String(64), primary_key=True, index=True)
+    job_id = Column(String(64), index=True, nullable=False)
+    customer_id = Column(String(64), index=True, nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    document_hash = Column(String(64), nullable=False)  # Original PDF SHA-256
+    station_id = Column(String(64), default="TERM-CYBERHUB-04", nullable=False)
+
+    # Milestones & Timestamps
+    upload_timestamp = Column(DateTime, nullable=False)
+    qr_redemption_timestamp = Column(DateTime, nullable=True)
+    print_submission_status = Column(String(32), default="PRINT_SUCCESS", nullable=False)
+
+    # Sanitization & Cleanup Status
+    server_cleanup_status = Column(String(32), default="COMPLETED", nullable=False)
+    station_cleanup_status = Column(String(32), default="COMPLETED", nullable=False)
+    cleanup_status = Column(String(32), default="COMPLETED", nullable=False)
+    document_integrity_status = Column(String(32), default="VERIFIED", nullable=False)
+
+    # Job Parameters
+    total_pages = Column(Integer, default=1, nullable=False)
+    copies = Column(Integer, default=1, nullable=False)
+    total_sheets = Column(Integer, default=1, nullable=False)
+    color_mode = Column(String(32), default="black_and_white", nullable=False)
+    total_cost = Column(Float, default=0.15, nullable=False)
+
+    # Cryptographic Audit Data
+    canonical_data = Column(String, nullable=False)
+    receipt_hash = Column(String(64), nullable=False)      # SHA-256 of canonical JSON
+    signature = Column(String(256), nullable=False)         # Ed25519 signature hex
+    signer_public_key = Column(String(128), nullable=False) # Ed25519 public key hex
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "receipt_id": self.receipt_id,
+            "job_id": self.job_id,
+            "customer_id": self.customer_id,
+            "original_filename": self.original_filename,
+            "document_hash": self.document_hash,
+            "station_id": self.station_id,
+            "upload_timestamp": self.upload_timestamp.isoformat() if self.upload_timestamp else None,
+            "qr_redemption_timestamp": self.qr_redemption_timestamp.isoformat() if self.qr_redemption_timestamp else None,
+            "print_submission_status": self.print_submission_status,
+            "server_cleanup_status": self.server_cleanup_status,
+            "station_cleanup_status": self.station_cleanup_status,
+            "cleanup_status": self.cleanup_status,
+            "document_integrity_status": self.document_integrity_status,
+            "job_parameters": {
+                "total_pages": self.total_pages,
+                "copies": self.copies,
+                "total_sheets": self.total_sheets,
+                "color_mode": self.color_mode,
+                "total_cost": self.total_cost,
+            },
+            "canonical_data": self.canonical_data,
+            "receipt_hash": self.receipt_hash,
+            "signature": self.signature,
+            "signer_public_key": self.signer_public_key,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 

@@ -98,6 +98,37 @@ def ensure_schema_migrations(engine):
             """))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_cleanup_reports_job_id ON cleanup_reports (job_id);"))
 
+            # Ensure digital_receipts table exists
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS digital_receipts (
+                    receipt_id VARCHAR(64) PRIMARY KEY,
+                    job_id VARCHAR(64) NOT NULL,
+                    customer_id VARCHAR(64) NOT NULL,
+                    original_filename VARCHAR(255) NOT NULL,
+                    document_hash VARCHAR(64) NOT NULL,
+                    station_id VARCHAR(64) NOT NULL,
+                    upload_timestamp DATETIME NOT NULL,
+                    qr_redemption_timestamp DATETIME,
+                    print_submission_status VARCHAR(32) NOT NULL DEFAULT 'PRINT_SUCCESS',
+                    server_cleanup_status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED',
+                    station_cleanup_status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED',
+                    cleanup_status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED',
+                    document_integrity_status VARCHAR(32) NOT NULL DEFAULT 'VERIFIED',
+                    total_pages INTEGER NOT NULL DEFAULT 1,
+                    copies INTEGER NOT NULL DEFAULT 1,
+                    total_sheets INTEGER NOT NULL DEFAULT 1,
+                    color_mode VARCHAR(32) NOT NULL DEFAULT 'black_and_white',
+                    total_cost FLOAT NOT NULL DEFAULT 0.15,
+                    canonical_data TEXT NOT NULL,
+                    receipt_hash VARCHAR(64) NOT NULL,
+                    signature VARCHAR(256) NOT NULL,
+                    signer_public_key VARCHAR(128) NOT NULL,
+                    created_at DATETIME NOT NULL
+                );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_digital_receipts_job_id ON digital_receipts (job_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_digital_receipts_customer_id ON digital_receipts (customer_id);"))
+
             conn.commit()
     except Exception as e:
         print(f"[Warning] Auto-migration check: {e}")

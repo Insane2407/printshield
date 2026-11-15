@@ -19,7 +19,8 @@ from ..schemas import (
     PrintSettingsResponse,
     GenerateQRRequest,
     GenerateQRResponse,
-    QRStatusResponse
+    QRStatusResponse,
+    DigitalReceiptResponse
 )
 from ..security.validator import sanitize_filename, calculate_sha256, validate_pdf_content
 from ..security.encryption import encryption_manager
@@ -528,3 +529,18 @@ def get_qr_status(job_id: str, db: Session = Depends(get_db)):
         station_id=latest_token.station_id,
         manual_code=latest_token.manual_code
     )
+
+@router.get("/{job_id}/receipt", response_model=DigitalReceiptResponse)
+def get_or_generate_job_receipt(job_id: str, db: Session = Depends(get_db)):
+    """Retrieve or automatically generate a verifiable digital receipt for this job."""
+    from ..services.receipt_service import receipt_service
+    r = receipt_service.generate_receipt_for_job(db, job_id)
+    return r.to_dict()
+
+@router.post("/{job_id}/generate-receipt", response_model=DigitalReceiptResponse)
+def mint_job_receipt(job_id: str, db: Session = Depends(get_db)):
+    """Explicitly mint a verifiable digital receipt for this job."""
+    from ..services.receipt_service import receipt_service
+    r = receipt_service.generate_receipt_for_job(db, job_id)
+    return r.to_dict()
+

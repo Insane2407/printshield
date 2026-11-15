@@ -43,7 +43,7 @@ def extract_token_and_station(payload: RedeemTokenRequest):
                 qs = parse_qs(parsed.query)
                 if "token" in qs and qs["token"]:
                     token_str = qs["token"][0].strip()
-                if "station" in qs and qs["station"]:
+                if not payload.station_id and "station" in qs and qs["station"]:
                     station_id = qs["station"][0].strip()
             except Exception:
                 token_str = raw_qr
@@ -52,7 +52,8 @@ def extract_token_and_station(payload: RedeemTokenRequest):
                 import json
                 data = json.loads(raw_qr)
                 token_str = data.get("token", token_str)
-                station_id = data.get("station_id", station_id)
+                if not payload.station_id:
+                    station_id = data.get("station_id", station_id)
             except Exception:
                 pass
         elif not token_str and not manual_pin:
@@ -303,6 +304,12 @@ def report_print_status(
                 )
             except Exception as e:
                 pass
+        # Automatically mint Digital Receipt
+        try:
+            from ..services.receipt_service import receipt_service
+            receipt_service.generate_receipt_for_job(db, job.job_id)
+        except Exception as e:
+            pass
     elif payload.status == "PRINT_FAILED":
         job.job_status = "AUTHORIZED"  # Revert to authorized so it can be retried
 

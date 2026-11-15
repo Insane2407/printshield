@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import engine, Base, get_db, ensure_schema_migrations
 from .models import PrintJob
-from .routers import jobs, station, cleanup
+from .routers import jobs, station, cleanup, receipts
 from .security.encryption import encryption_manager
 from .security.validator import calculate_sha256
 
@@ -42,6 +42,7 @@ app.add_middleware(
 app.include_router(jobs.router)
 app.include_router(station.router)
 app.include_router(cleanup.router)
+app.include_router(receipts.router)
 
 @app.get("/")
 def root():

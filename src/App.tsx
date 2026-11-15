@@ -10,6 +10,7 @@ import { CustomerDashboardPage } from './pages/CustomerDashboardPage';
 import { OperatorDashboardPage } from './pages/OperatorDashboardPage';
 import { JobDetailsPage } from './pages/JobDetailsPage';
 import { ReceiptPage } from './pages/ReceiptPage';
+import { ReceiptVerificationPage } from './pages/ReceiptVerificationPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -27,11 +28,16 @@ export const App: React.FC = () => {
             <Route path="/customer" element={<CustomerDashboardPage />} />
             <Route path="/customer/jobs/:jobId" element={<JobDetailsPage />} />
             <Route path="/customer/receipt/:receiptId" element={<ReceiptPage />} />
+            <Route path="/customer/receipt/:receiptId/verify" element={<ReceiptVerificationPage />} />
 
             {/* Operator Kiosk Terminal */}
             <Route path="/operator" element={<OperatorDashboardPage />} />
             <Route path="/operator/jobs/:jobId" element={<JobDetailsPage />} />
             <Route path="/operator/receipt/:receiptId" element={<ReceiptPage />} />
+            <Route path="/operator/receipt/:receiptId/verify" element={<ReceiptVerificationPage />} />
+
+            {/* Public Cryptographic Receipt Verification */}
+            <Route path="/verify-receipt" element={<ReceiptVerificationPage />} />
 
             {/* General Routes */}
             <Route path="/login" element={<LoginPage />} />

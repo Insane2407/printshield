@@ -211,5 +211,56 @@ class SweepExpiredResponse(BaseModel):
     cleaned_jobs_count: int
     reports: List[dict]
 
+# =========================================================================
+# Digital Receipt & Audit Trail Schemas
+# =========================================================================
+class DigitalReceiptResponse(BaseModel):
+    receipt_id: str
+    job_id: str
+    customer_id: str
+    original_filename: str
+    document_hash: str
+    station_id: str
+    upload_timestamp: datetime
+    qr_redemption_timestamp: Optional[datetime] = None
+    print_submission_status: str
+    server_cleanup_status: str
+    station_cleanup_status: str
+    cleanup_status: str
+    document_integrity_status: str
+    job_parameters: dict
+    canonical_data: str
+    receipt_hash: str
+    signature: str
+    signer_public_key: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class VerifyReceiptRequest(BaseModel):
+    receipt_id: Optional[str] = None
+    canonical_data: Optional[str] = None
+    signature: Optional[str] = None
+    public_key: Optional[str] = None
+
+class VerifyReceiptResponse(BaseModel):
+    is_valid: bool
+    receipt_id: Optional[str] = None
+    job_id: Optional[str] = None
+    document_integrity: str = "VERIFIED" # VERIFIED | FAILED | UNKNOWN
+    document_hash: Optional[str] = None
+    hash_valid: bool
+    signature_valid: bool
+    print_submission_status: Optional[str] = None
+    server_cleanup_status: Optional[str] = None
+    station_cleanup_status: Optional[str] = None
+    cleanup_status: Optional[str] = None
+    signer_public_key: Optional[str] = None
+    message: str
+    disclaimer: str
+    receipt: Optional[dict] = None
+
+
 
 

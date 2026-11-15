@@ -169,6 +169,13 @@ def report_station_cleanup(
         station_report_data=payload.dict()
     )
 
+    # Automatically generate / refresh digital receipt
+    try:
+        from ..services.receipt_service import receipt_service
+        receipt_service.generate_receipt_for_job(db, job.job_id)
+    except Exception:
+        pass
+
     return format_cleanup_report_response(report, job)
 
 @router.post("/cleanup/sweep-expired", response_model=SweepExpiredResponse)

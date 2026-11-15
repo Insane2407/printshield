@@ -24,7 +24,8 @@ import {
   RefreshCw,
   Copy,
   Check,
-  Trash2
+  Trash2,
+  Receipt
 } from 'lucide-react';
 
 export const CustomerDashboardPage: React.FC = () => {
@@ -300,6 +301,21 @@ export const CustomerDashboardPage: React.FC = () => {
                         <Badge cleanupStatus={job.cleanupStatus} size="sm" icon={false} />
                         <Trash2 className="w-3 h-3 text-purple-400" />
                       </button>
+
+                      {/* View Verifiable Receipt */}
+                      {(job.status === 'completed' || job.status === 'shredded') && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/customer/receipt/${job.id}`);
+                          }}
+                          title="View Verifiable Cryptographic Receipt"
+                          className="px-2 py-1 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 hover:border-emerald-400/60 transition-colors flex items-center gap-1 text-[11px] font-mono"
+                        >
+                          <Receipt className="w-3 h-3 text-emerald-400" />
+                          <span className="hidden sm:inline">Receipt</span>
+                        </button>
+                      )}
 
                       <div className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 transition-colors">
                         <ExternalLink className="w-4 h-4" />

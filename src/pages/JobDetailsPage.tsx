@@ -81,8 +81,8 @@ export const JobDetailsPage: React.FC = () => {
   const LayoutComponent = role === 'operator' ? OperatorLayout : CustomerLayout;
   const backRoute = role === 'operator' ? '/operator' : '/customer';
   const receiptRoute = role === 'operator' 
-    ? `/operator/receipt/rcpt-${currentJob?.id.replace('job-', '')}`
-    : `/customer/receipt/rcpt-${currentJob?.id.replace('job-', '')}`;
+    ? `/operator/receipt/${currentJob?.jobCode || currentJob?.id}`
+    : `/customer/receipt/${currentJob?.jobCode || currentJob?.id}`;
 
   if (!currentJob) {
     return (
@@ -116,14 +116,14 @@ export const JobDetailsPage: React.FC = () => {
         </Link>
 
         <div className="flex items-center gap-2">
-          {currentJob.status === 'shredded' && (
+          {(currentJob.status === 'shredded' || currentJob.status === 'completed' || currentJob.cleanupStatus === 'completed') && (
             <Button
               size="sm"
               variant="secondary"
               leftIcon={<ReceiptIcon className="w-3.5 h-3.5 text-purple-400" />}
               onClick={() => navigate(receiptRoute)}
             >
-              View Cryptographic Receipt
+              View Verifiable Receipt
             </Button>
           )}
 

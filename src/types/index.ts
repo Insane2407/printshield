@@ -145,8 +145,54 @@ export interface Receipt {
   documentHashSha256: string;
   shreddingProofHash: string;
   retentionPolicy: string;
-  printStatus: 'Completed & Physically Ejected';
-  cleanupStatus: 'DoD 5220.22-M Verified Overwrite';
+  printStatus: string;
+  cleanupStatus: string;
+}
+
+export interface DigitalReceipt {
+  receipt_id: string;
+  job_id: string;
+  customer_id: string;
+  original_filename: string;
+  document_hash: string;
+  station_id: string;
+  upload_timestamp: string;
+  qr_redemption_timestamp?: string | null;
+  print_submission_status: string;
+  server_cleanup_status: string;
+  station_cleanup_status: string;
+  cleanup_status: string;
+  document_integrity_status: string;
+  job_parameters: {
+    total_pages: number;
+    copies: number;
+    total_sheets: number;
+    color_mode: string;
+    total_cost: number;
+  };
+  canonical_data: string;
+  receipt_hash: string;
+  signature: string;
+  signer_public_key: string;
+  created_at: string;
+}
+
+export interface ReceiptVerificationResult {
+  is_valid: boolean;
+  receipt_id?: string;
+  job_id?: string;
+  document_integrity: 'VERIFIED' | 'FAILED' | 'UNKNOWN';
+  document_hash?: string;
+  hash_valid: boolean;
+  signature_valid: boolean;
+  print_submission_status?: string;
+  server_cleanup_status?: string;
+  station_cleanup_status?: string;
+  cleanup_status?: string;
+  signer_public_key?: string;
+  message: string;
+  disclaimer: string;
+  receipt?: DigitalReceipt | null;
 }
 
 export interface PrinterDevice {

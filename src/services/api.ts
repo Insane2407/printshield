@@ -1,4 +1,4 @@
-import { PrintJob, Receipt, User, PrinterDevice, CleanupReport } from '../types';
+import { PrintJob, Receipt, User, PrinterDevice, CleanupReport, DigitalReceipt, ReceiptVerificationResult } from '../types';
 import { 
   currentUserCustomer, 
   currentUserOperator, 
@@ -679,8 +679,25 @@ export const api = {
       }
     },
     async releaseAndPrint(jobId: string, printerId?: string): Promise<PrintJob> {
-      const idx = memoryJobs.findIndex(j => j.id === jobId);
+      const idx = memoryJobs.findIndex(j => j.id === jobId || j.jobCode === jobId);
       if (idx === -1) throw new Error('Job not found');
+      
+      const targetJob = memoryJobs[idx];
+      const backendJobId = targetJob.jobCode || jobId;
+      try {
+        await fetch(`${API_BASE_URL}/station/jobs/${backendJobId}/report-print`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            station_id: currentUserOperator.terminalId || 'TERM-CYBERHUB-04',
+            status: 'PRINT_SUBMITTED',
+            printer_name: printerId || 'Microsoft Print to PDF',
+            details: 'Dispatched via operator console'
+          })
+        });
+      } catch (e) {
+        console.warn('Backend report-print PRINT_SUBMITTED failed, continuing in memory:', e);
+      }
       
       const now = new Date();
       const updated: PrintJob = {
@@ -698,7 +715,7 @@ export const api = {
             action: 'One-Time Decrypt Stream Dispatched to Hardware Spool',
             actor: `${currentUserOperator.name} (Terminal 04)`,
             actorRole: 'operator',
-            details: `Job dispatched directly to printer [${printerId || 'Secure Laser Pro 400'}]. Zero local disk cache retained.`,
+            details: `Job dispatched directly to printer [${printerId || 'Microsoft Print to PDF'}]. Zero local disk cache retained.`,
             securityHash: '8b919a712c98d716245e90ab12f45c8109283746eabc110294857162534'
           }
         ]
@@ -707,10 +724,37 @@ export const api = {
       return updated;
     },
     async markCompletedAndShred(jobId: string): Promise<{ job: PrintJob; receipt: Receipt }> {
-      const idx = memoryJobs.findIndex(j => j.id === jobId);
+      const idx = memoryJobs.findIndex(j => j.id === jobId || j.jobCode === jobId);
       if (idx === -1) throw new Error('Job not found');
 
       const job = memoryJobs[idx];
+      const backendJobId = job.jobCode || jobId;
+
+      try {
+        await fetch(`${API_BASE_URL}/station/jobs/${backendJobId}/report-print`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            station_id: currentUserOperator.terminalId || 'TERM-CYBERHUB-04',
+            status: 'PRINT_SUCCESS',
+            printer_name: 'Microsoft Print to PDF',
+            details: 'Print confirmed & completed by operator'
+          })
+        });
+        await fetch(`${API_BASE_URL}/station/jobs/${backendJobId}/report-cleanup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            station_id: currentUserOperator.terminalId || 'TERM-CYBERHUB-04',
+            decrypted_file_deleted: true,
+            job_data_cleared: true,
+            temp_files_deleted_count: 1
+          })
+        });
+      } catch (e) {
+        console.warn('Backend report-cleanup failed, continuing in memory:', e);
+      }
+
       const now = new Date();
       const shredHash = `SHRED-CERT-${Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
 
@@ -779,14 +823,124 @@ export const api = {
     }
   },
 
-  // Receipts
+  // Receipts & Cryptographic Verification
   receipts: {
     async list(): Promise<Receipt[]> {
+      try {
+        const res = await fetch(`${API_BASE_URL}/receipts`);
+        if (res.ok) {
+          const list: DigitalReceipt[] = await res.json();
+          const mapped = list.map(r => ({
+            id: r.receipt_id.toLowerCase(),
+            receiptNumber: r.receipt_id,
+            jobId: r.job_id.toLowerCase(),
+            jobCode: r.job_id,
+            documentName: r.original_filename,
+            pages: r.job_parameters?.total_pages || 1,
+            copies: r.job_parameters?.copies || 1,
+            colorMode: (r.job_parameters?.color_mode || 'black_and_white') as any,
+            paperSize: 'A4',
+            costPerPage: r.job_parameters?.color_mode === 'color' ? 0.30 : 0.15,
+            totalAmount: r.job_parameters?.total_cost || 0.15,
+            currency: 'USD',
+            issuedAt: r.created_at,
+            cybercafeName: 'CyberHub Station Downtown',
+            cybercafeAddress: '742 Market St, Floor 1, San Francisco, CA',
+            operatorName: 'Alex Mercer (Station 04)',
+            terminalId: r.station_id,
+            clientKeyFingerprint: 'SHA256:9A4E:7F82:B01C:53ED:9821:4B2C:77AF:D012',
+            documentHashSha256: r.document_hash,
+            shreddingProofHash: r.signature,
+            retentionPolicy: 'Zero-Retention: Ephemeral RAM purged upon hardware feed confirmation',
+            printStatus: r.print_submission_status,
+            cleanupStatus: r.cleanup_status,
+            digitalReceipt: r
+          }));
+          const existingIds = new Set(mapped.map(m => m.id));
+          const remainingMemory = memoryReceipts.filter(m => !existingIds.has(m.id));
+          return [...mapped, ...remainingMemory];
+        }
+      } catch (e) {}
       return [...memoryReceipts];
     },
-    async getByJobId(jobId: string): Promise<Receipt | null> {
+
+    async getByJobId(jobId: string): Promise<(Receipt & { digitalReceipt?: DigitalReceipt }) | null> {
+      try {
+        const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/receipt`);
+        if (res.ok) {
+          const r: DigitalReceipt = await res.json();
+          return {
+            id: r.receipt_id.toLowerCase(),
+            receiptNumber: r.receipt_id,
+            jobId: r.job_id.toLowerCase(),
+            jobCode: r.job_id,
+            documentName: r.original_filename,
+            pages: r.job_parameters?.total_pages || 1,
+            copies: r.job_parameters?.copies || 1,
+            colorMode: (r.job_parameters?.color_mode || 'black_and_white') as any,
+            paperSize: 'A4',
+            costPerPage: r.job_parameters?.color_mode === 'color' ? 0.30 : 0.15,
+            totalAmount: r.job_parameters?.total_cost || 0.15,
+            currency: 'USD',
+            issuedAt: r.created_at,
+            cybercafeName: 'CyberHub Station Downtown',
+            cybercafeAddress: '742 Market St, Floor 1, San Francisco, CA',
+            operatorName: 'Alex Mercer (Station 04)',
+            terminalId: r.station_id,
+            clientKeyFingerprint: 'SHA256:9A4E:7F82:B01C:53ED:9821:4B2C:77AF:D012',
+            documentHashSha256: r.document_hash,
+            shreddingProofHash: r.signature,
+            retentionPolicy: 'Zero-Retention: Ephemeral RAM purged upon hardware feed confirmation',
+            printStatus: r.print_submission_status,
+            cleanupStatus: r.cleanup_status,
+            digitalReceipt: r
+          };
+        }
+      } catch (e) {}
       const found = memoryReceipts.find(r => r.jobId === jobId || r.jobCode === jobId || r.id === jobId);
       return found ? { ...found } : null;
+    },
+
+    async getDigitalReceipt(receiptId: string): Promise<DigitalReceipt> {
+      const res = await fetch(`${API_BASE_URL}/receipts/${receiptId}`);
+      if (!res.ok) {
+        let err = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data.detail) err = data.detail;
+        } catch {}
+        throw new Error(err);
+      }
+      return await res.json();
+    },
+
+    async verify(payload: { receipt_id?: string; canonical_data?: string; signature?: string; public_key?: string }): Promise<ReceiptVerificationResult> {
+      const res = await fetch(`${API_BASE_URL}/receipts/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        let err = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data.detail) err = data.detail;
+        } catch {}
+        throw new Error(err);
+      }
+      return await res.json();
+    },
+
+    async downloadPdf(receiptId: string): Promise<Blob> {
+      const res = await fetch(`${API_BASE_URL}/receipts/${receiptId}/download-pdf`);
+      if (!res.ok) throw new Error(`Failed to download PDF receipt (HTTP ${res.status})`);
+      return await res.blob();
+    },
+
+    async getPublicKey(): Promise<{ algorithm: string; public_key_hex: string; public_key_pem: string }> {
+      const res = await fetch(`${API_BASE_URL}/receipts/public-key`);
+      if (!res.ok) throw new Error('Failed to fetch public key');
+      return await res.json();
     }
   }
 };
