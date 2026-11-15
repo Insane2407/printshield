@@ -12,6 +12,20 @@ dist
 dist-ssr
 *.local
 
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+backend/venv/
+*.db
+*.sqlite3
+
+# Encrypted Vault Storage & Private Keys (NEVER COMMIT)
+storage/
+*.enc
+*.key
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -26,3 +40,4 @@ dist-ssr
 # Environment
 .env
 .env.production
+backend/.env

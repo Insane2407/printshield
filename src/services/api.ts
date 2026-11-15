@@ -1,4 +1,4 @@
-import { PrintJob, Receipt, User, PrinterDevice, AuditEvent } from '../types';
+import { PrintJob, Receipt, User, PrinterDevice } from '../types';
 import { 
   currentUserCustomer, 
   currentUserOperator, 
@@ -7,24 +7,7 @@ import {
   samplePrinters 
 } from '../data/sampleData';
 
-/**
- * FastAPI Backend Integration Architecture
- * 
- * When the FastAPI backend is running:
- * Set VITE_USE_LIVE_API=true and VITE_API_BASE_URL=http://localhost:8000/api/v1
- * All endpoints below map 1:1 to FastAPI APIRouters:
- *   - /auth (login, register, me, keys)
- *   - /jobs (upload encrypted envelope, list, get, update status, cancel)
- *   - /operator (verify-pin, release-job, shred-job, queue, printer status)
- *   - /receipts (generate, get, verify-shred)
- */
-
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T;
-  message?: string;
-  timestamp: string;
-}
+const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
 
 export interface CreateJobPayload {
   documentName: string;
@@ -39,13 +22,86 @@ export interface CreateJobPayload {
   keyFingerprint: string;
 }
 
-// Local reactive storage for seamless demo interaction before FastAPI is connected
-let activeJobs: PrintJob[] = [...samplePrintJobs];
-let activeReceipts: Receipt[] = [...sampleReceipts];
-let activePrinters: PrinterDevice[] = [...samplePrinters];
+export interface BackendJobRecord {
+  job_id: string;
+  customer_id: string;
+  original_filename: string;
+  document_hash: string;
+  file_size: number;
+  upload_timestamp: string;
+  job_status: string;
+  encryption_scheme: string;
+  release_pin: string;
+  page_count: number;
+  copies: number;
+  color_mode: 'black_and_white' | 'color';
+  shredded_at?: string | null;
+  shredding_hash?: string | null;
+}
+
+export interface BackendUploadResponse {
+  success: boolean;
+  message: string;
+  job_id: string;
+  job: BackendJobRecord;
+}
+
+// Convert FastAPI backend record to React frontend PrintJob model
+export function transformBackendJob(record: BackendJobRecord): PrintJob {
+  const costRate = record.color_mode === 'color' ? 0.30 : 0.15;
+  const totalCost = Number((record.page_count * record.copies * costRate).toFixed(2));
+  const created = new Date(record.upload_timestamp || Date.now());
+  const expires = new Date(created.getTime() + 60 * 60 * 1000);
+
+  return {
+    id: record.job_id.toLowerCase(),
+    jobCode: record.job_id,
+    releasePin: record.release_pin,
+    qrPayload: `printshield://release?job=${record.job_id}&token=${record.release_pin}&hash=${record.document_hash.slice(0, 16)}`,
+    documentName: record.original_filename,
+    fileSizeBytes: record.file_size,
+    pageCount: record.page_count,
+    copies: record.copies,
+    colorMode: record.color_mode,
+    paperSize: 'A4',
+    duplex: true,
+    totalCost,
+    status: record.job_status.toLowerCase() as any,
+    cleanupStatus: record.shredding_hash ? 'verified_dod' : 'pending',
+    encryptionScheme: 'AES-256-GCM + Client Ephemeral Key',
+    clientHashSha256: record.document_hash,
+    serverEnvelopeCipher: `ECDH-P256-AES256GCM-${record.job_id}`,
+    keyFingerprint: 'SHA256:9A4E:7F82:B01C:53ED:9821:4B2C:77AF:D012',
+    shreddingHash: record.shredding_hash || undefined,
+    cybercafeId: 'cafe-01',
+    cybercafeName: 'CyberHub Station Downtown',
+    cybercafeLocation: '742 Market St, Floor 1, San Francisco, CA',
+    terminalId: 'TERM-CYBERHUB-04',
+    createdAt: record.upload_timestamp,
+    expiresAt: expires.toISOString(),
+    printedAt: undefined,
+    shreddedAt: record.shredded_at || undefined,
+    auditTrail: [
+      {
+        id: `aud-${record.job_id}-01`,
+        timestamp: record.upload_timestamp,
+        action: 'AES-256-GCM Hardware Encrypted Payload Stored',
+        actor: 'FastAPI Cryptography Engine',
+        actorRole: 'system',
+        details: `File verified (%PDF-), hashed (SHA-256: ${record.document_hash.slice(0, 16)}...), encrypted and stored in private vault.`,
+        securityHash: record.document_hash
+      }
+    ]
+  };
+}
+
+// In-memory cache for fast local interaction
+let memoryJobs: PrintJob[] = [...samplePrintJobs];
+let memoryReceipts: Receipt[] = [...sampleReceipts];
+let memoryPrinters: PrinterDevice[] = [...samplePrinters];
 
 export const api = {
-  // Authentication & Profile Endpoints
+  // Authentication
   auth: {
     async getCurrentUser(role: 'customer' | 'operator' = 'customer'): Promise<User> {
       return role === 'operator' ? currentUserOperator : currentUserCustomer;
@@ -73,15 +129,68 @@ export const api = {
     }
   },
 
-  // Jobs Endpoints (maps to /api/v1/jobs)
+  // Jobs Endpoints (Live FastAPI Integration with Fallback)
   jobs: {
-    async list(): Promise<PrintJob[]> {
-      return [...activeJobs];
+    /**
+     * Upload real PDF to FastAPI backend with authentic progress callback
+     */
+    async uploadDocument(
+      file: File,
+      options: {
+        customerId?: string;
+        colorMode?: 'black_and_white' | 'color';
+        copies?: number;
+      } = {},
+      onProgress?: (percent: number) => void
+    ): Promise<PrintJob> {
+      return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('customer_id', options.customerId || 'usr-cst-9021');
+        formData.append('color_mode', options.colorMode || 'black_and_white');
+        formData.append('copies', String(options.copies || 1));
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE_URL}/jobs/upload`, true);
+
+        // Track real upload progress
+        if (onProgress) {
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const pct = Math.round((event.loaded / event.total) * 100);
+              onProgress(pct);
+            }
+          };
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res: BackendUploadResponse = JSON.parse(xhr.responseText);
+              const frontendJob = transformBackendJob(res.job);
+              memoryJobs = [frontendJob, ...memoryJobs];
+              resolve(frontendJob);
+            } catch (err) {
+              reject(new Error('Invalid JSON response from server.'));
+            }
+          } else {
+            let errorMsg = `Server returned ${xhr.status}`;
+            try {
+              const errorRes = JSON.parse(xhr.responseText);
+              if (errorRes.detail) errorMsg = errorRes.detail;
+            } catch {}
+            reject(new Error(errorMsg));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Network error connecting to FastAPI backend at ' + API_BASE_URL));
+        };
+
+        xhr.send(formData);
+      });
     },
-    async getById(id: string): Promise<PrintJob | null> {
-      const found = activeJobs.find(j => j.id === id || j.jobCode === id);
-      return found ? { ...found } : null;
-    },
+
     async create(payload: CreateJobPayload): Promise<PrintJob> {
       const randomNum = Math.floor(1000 + Math.random() * 9000);
       const pinPart1 = Math.floor(100 + Math.random() * 900);
@@ -90,26 +199,14 @@ export const api = {
       const releasePin = `${pinPart1}-${pinPart2}`;
       const costRate = payload.colorMode === 'color' ? 0.30 : 0.15;
       const totalCost = Number((payload.pageCount * payload.copies * costRate).toFixed(2));
-
       const now = new Date();
-      const expires = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour TTL
-      const qrPayload = `printshield://release?job=${jobCode}&token=${releasePin}&key=9A4E7F82B01C&exp=${Math.floor(expires.getTime() / 1000)}`;
-
-      const initialAudit: AuditEvent = {
-        id: `aud-${Date.now()}`,
-        timestamp: now.toISOString(),
-        action: 'Client-Side Envelope Encryption & QR Generated',
-        actor: `${currentUserCustomer.name} (Customer Client)`,
-        actorRole: 'customer',
-        details: 'Encrypted payload created in browser sandbox with ephemeral key.',
-        securityHash: payload.clientHashSha256 || '9f83c6b12a81389c968f9b977c0fc4410a08e1a89b09a9386348ef5370f7f012',
-      };
+      const expires = new Date(now.getTime() + 60 * 60 * 1000);
 
       const newJob: PrintJob = {
         id: `job-${randomNum}`,
         jobCode,
         releasePin,
-        qrPayload,
+        qrPayload: `printshield://release?job=${jobCode}&token=${releasePin}&key=9A4E7F82B01C`,
         documentName: payload.documentName,
         fileSizeBytes: payload.fileSizeBytes,
         pageCount: payload.pageCount,
@@ -121,42 +218,88 @@ export const api = {
         status: 'ready',
         cleanupStatus: 'pending',
         encryptionScheme: 'AES-256-GCM + Client Ephemeral Key',
-        clientHashSha256: payload.clientHashSha256 || '9f83c6b12a81389c968f9b977c0fc4410a08e1a89b09a9386348ef5370f7f012',
+        clientHashSha256: payload.clientHashSha256,
         serverEnvelopeCipher: `ECDH-P256-AES256GCM-${randomNum}`,
-        keyFingerprint: payload.keyFingerprint || currentUserCustomer.keyFingerprint || 'SHA256:9A4E:7F82:B01C',
+        keyFingerprint: payload.keyFingerprint,
         cybercafeId: payload.cybercafeId,
         cybercafeName: 'CyberHub Station Downtown',
         cybercafeLocation: '742 Market St, Floor 1, San Francisco, CA',
         createdAt: now.toISOString(),
         expiresAt: expires.toISOString(),
-        auditTrail: [initialAudit],
+        auditTrail: [
+          {
+            id: `aud-${randomNum}-init`,
+            timestamp: now.toISOString(),
+            action: 'Client-Side Envelope Encryption Generated',
+            actor: 'Alex Vance (Customer Client)',
+            actorRole: 'customer',
+            details: 'Encrypted with 256-bit AES GCM key.',
+            securityHash: payload.clientHashSha256
+          }
+        ]
       };
-
-      activeJobs = [newJob, ...activeJobs];
+      memoryJobs = [newJob, ...memoryJobs];
       return newJob;
     },
+
+    async list(): Promise<PrintJob[]> {
+      try {
+        const res = await fetch(`${API_BASE_URL}/jobs`, { method: 'GET' });
+        if (res.ok) {
+          const backendList: BackendJobRecord[] = await res.json();
+          const transformed = backendList.map(transformBackendJob);
+          // Merge unique jobs
+          const existingIds = new Set(transformed.map(j => j.id));
+          const remainingMemory = memoryJobs.filter(j => !existingIds.has(j.id));
+          return [...transformed, ...remainingMemory];
+        }
+      } catch (err) {
+        // Fallback to memory store if backend unreachable
+      }
+      return [...memoryJobs];
+    },
+
+    async getById(id: string): Promise<PrintJob | null> {
+      try {
+        const res = await fetch(`${API_BASE_URL}/jobs/${id}`, { method: 'GET' });
+        if (res.ok) {
+          const record: BackendJobRecord = await res.json();
+          return transformBackendJob(record);
+        }
+      } catch (err) {}
+      const found = memoryJobs.find(j => j.id === id || j.jobCode === id);
+      return found ? { ...found } : null;
+    },
+
+    async verifyDecryption(jobId: string): Promise<any> {
+      const res = await fetch(`${API_BASE_URL}/jobs/${jobId}/verify-decryption`);
+      if (!res.ok) {
+        throw new Error('Verification failed or job not found on server.');
+      }
+      return await res.json();
+    },
+
     async cancel(id: string): Promise<PrintJob | null> {
-      const idx = activeJobs.findIndex(j => j.id === id);
+      const idx = memoryJobs.findIndex(j => j.id === id);
       if (idx === -1) return null;
-      activeJobs[idx] = {
-        ...activeJobs[idx],
+      memoryJobs[idx] = {
+        ...memoryJobs[idx],
         status: 'expired',
         cleanupStatus: 'purged',
         shreddedAt: new Date().toISOString(),
-        shreddingHash: `CANCEL-PURGE-${Date.now()}`,
+        shreddingHash: `CANCEL-SHRED-${Date.now()}`,
       };
-      return activeJobs[idx];
+      return memoryJobs[idx];
     }
   },
 
-  // Operator Actions (maps to /api/v1/operator)
+  // Operator Actions
   operator: {
     async verifyPin(pin: string): Promise<{ valid: boolean; job?: PrintJob; message?: string }> {
       const normalized = pin.trim().replace(/\s+/g, '');
-      const job = activeJobs.find(j => 
+      const job = memoryJobs.find(j => 
         j.releasePin.replace('-', '') === normalized.replace('-', '') ||
-        j.jobCode.toLowerCase() === normalized.toLowerCase() ||
-        j.qrPayload.includes(normalized)
+        j.jobCode.toLowerCase() === normalized.toLowerCase()
       );
       if (!job) {
         return { valid: false, message: 'Invalid or expired Release Token. Verification failed.' };
@@ -164,19 +307,19 @@ export const api = {
       return { valid: true, job };
     },
     async releaseAndPrint(jobId: string, printerId?: string): Promise<PrintJob> {
-      const idx = activeJobs.findIndex(j => j.id === jobId);
+      const idx = memoryJobs.findIndex(j => j.id === jobId);
       if (idx === -1) throw new Error('Job not found');
       
       const now = new Date();
       const updated: PrintJob = {
-        ...activeJobs[idx],
+        ...memoryJobs[idx],
         status: 'printing',
         cleanupStatus: 'in_progress',
         operatorId: currentUserOperator.id,
         operatorName: currentUserOperator.name,
         terminalId: currentUserOperator.terminalId,
         auditTrail: [
-          ...activeJobs[idx].auditTrail,
+          ...memoryJobs[idx].auditTrail,
           {
             id: `aud-${Date.now()}`,
             timestamp: now.toISOString(),
@@ -188,14 +331,14 @@ export const api = {
           }
         ]
       };
-      activeJobs[idx] = updated;
+      memoryJobs[idx] = updated;
       return updated;
     },
     async markCompletedAndShred(jobId: string): Promise<{ job: PrintJob; receipt: Receipt }> {
-      const idx = activeJobs.findIndex(j => j.id === jobId);
+      const idx = memoryJobs.findIndex(j => j.id === jobId);
       if (idx === -1) throw new Error('Job not found');
 
-      const job = activeJobs[idx];
+      const job = memoryJobs[idx];
       const now = new Date();
       const shredHash = `SHRED-CERT-${Array.from({ length: 48 }, () => Math.floor(Math.random() * 16).toString(16)).join('')}`;
 
@@ -228,7 +371,7 @@ export const api = {
           }
         ]
       };
-      activeJobs[idx] = updatedJob;
+      memoryJobs[idx] = updatedJob;
 
       const newReceipt: Receipt = {
         id: `rcpt-${job.id.replace('job-', '')}`,
@@ -256,22 +399,21 @@ export const api = {
         cleanupStatus: 'DoD 5220.22-M Verified Overwrite'
       };
 
-      activeReceipts = [newReceipt, ...activeReceipts];
-
+      memoryReceipts = [newReceipt, ...memoryReceipts];
       return { job: updatedJob, receipt: newReceipt };
     },
     async getPrinters(): Promise<PrinterDevice[]> {
-      return [...activePrinters];
+      return [...memoryPrinters];
     }
   },
 
-  // Receipts Endpoints (maps to /api/v1/receipts)
+  // Receipts
   receipts: {
     async list(): Promise<Receipt[]> {
-      return [...activeReceipts];
+      return [...memoryReceipts];
     },
     async getByJobId(jobId: string): Promise<Receipt | null> {
-      const found = activeReceipts.find(r => r.jobId === jobId || r.jobCode === jobId || r.id === jobId);
+      const found = memoryReceipts.find(r => r.jobId === jobId || r.jobCode === jobId || r.id === jobId);
       return found ? { ...found } : null;
     }
   }
