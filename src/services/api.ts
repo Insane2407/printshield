@@ -32,9 +32,22 @@ export interface BackendJobRecord {
   job_status: string;
   encryption_scheme: string;
   release_pin: string;
-  page_count: number;
+  total_document_pages?: number;
+  page_count?: number;
   copies: number;
+  page_range?: string;
+  paper_size?: string;
+  orientation?: 'portrait' | 'landscape';
   color_mode: 'black_and_white' | 'color';
+  duplex?: 'single_sided' | 'double_sided';
+  selected_pages_count?: number;
+  total_sheets?: number;
+  rate_per_page?: number;
+  total_cost?: number;
+  station_id?: string;
+  printer_id?: string;
+  configured_at?: string;
+  expires_at?: string;
   shredded_at?: string | null;
   shredding_hash?: string | null;
 }
@@ -46,26 +59,88 @@ export interface BackendUploadResponse {
   job: BackendJobRecord;
 }
 
+export interface ConfigureJobPayload {
+  customerId: string;
+  copies: number;
+  pageRange: string;
+  paperSize: string;
+  orientation: 'portrait' | 'landscape';
+  colorMode: 'black_and_white' | 'color';
+  duplex: 'single_sided' | 'double_sided';
+  expirationMinutes: number;
+  stationId?: string;
+  printerId?: string;
+}
+
+export interface PrintSettingsResponse {
+  job_id: string;
+  original_filename: string;
+  file_size: number;
+  total_document_pages: number;
+  job_status: string;
+  customer_id: string;
+  copies: number;
+  page_range: string;
+  selected_pages: number[];
+  selected_pages_count: number;
+  paper_size: string;
+  orientation: 'portrait' | 'landscape';
+  color_mode: 'black_and_white' | 'color';
+  duplex: 'single_sided' | 'double_sided';
+  rate_per_page: number;
+  total_sheets: number;
+  total_cost: number;
+  release_pin: string;
+  qr_payload: string;
+  station_id: string;
+  printer_id?: string;
+  upload_timestamp: string;
+  configured_at?: string;
+  expires_at?: string;
+}
+
+export interface ConfigureResponse {
+  success: boolean;
+  message: string;
+  job_id: string;
+  job_status: string;
+  settings: PrintSettingsResponse;
+}
+
 // Convert FastAPI backend record to React frontend PrintJob model
 export function transformBackendJob(record: BackendJobRecord): PrintJob {
-  const costRate = record.color_mode === 'color' ? 0.30 : 0.15;
-  const totalCost = Number((record.page_count * record.copies * costRate).toFixed(2));
+  const pages = record.total_document_pages || record.page_count || 1;
+  const copies = record.copies || 1;
+  const isColor = record.color_mode === 'color';
+  const rate = record.rate_per_page || (isColor ? 0.30 : 0.15);
+  const selectedCount = record.selected_pages_count || pages;
+  const cost = record.total_cost !== undefined ? record.total_cost : Number((selectedCount * copies * rate).toFixed(2));
+  const isDuplex = record.duplex === 'double_sided';
+  const totalSheets = record.total_sheets !== undefined 
+    ? record.total_sheets 
+    : (isDuplex ? Math.ceil(selectedCount / 2) * copies : selectedCount * copies);
+
   const created = new Date(record.upload_timestamp || Date.now());
-  const expires = new Date(created.getTime() + 60 * 60 * 1000);
+  const expires = record.expires_at ? new Date(record.expires_at) : new Date(created.getTime() + 60 * 60 * 1000);
 
   return {
     id: record.job_id.toLowerCase(),
     jobCode: record.job_id,
     releasePin: record.release_pin,
-    qrPayload: `printshield://release?job=${record.job_id}&token=${record.release_pin}&hash=${record.document_hash.slice(0, 16)}`,
+    qrPayload: `printshield://release?job=${record.job_id}&token=${record.release_pin}&station=${record.station_id || 'TERM-CYBERHUB-04'}`,
     documentName: record.original_filename,
     fileSizeBytes: record.file_size,
-    pageCount: record.page_count,
-    copies: record.copies,
+    pageCount: pages,
+    copies: copies,
     colorMode: record.color_mode,
-    paperSize: 'A4',
-    duplex: true,
-    totalCost,
+    paperSize: (record.paper_size as any) || 'A4',
+    duplex: isDuplex,
+    pageRange: record.page_range || 'all',
+    selectedPagesCount: selectedCount,
+    totalSheets: totalSheets,
+    orientation: record.orientation || 'portrait',
+    ratePerPage: rate,
+    totalCost: cost,
     status: record.job_status.toLowerCase() as any,
     cleanupStatus: record.shredding_hash ? 'verified_dod' : 'pending',
     encryptionScheme: 'AES-256-GCM + Client Ephemeral Key',
@@ -76,9 +151,10 @@ export function transformBackendJob(record: BackendJobRecord): PrintJob {
     cybercafeId: 'cafe-01',
     cybercafeName: 'CyberHub Station Downtown',
     cybercafeLocation: '742 Market St, Floor 1, San Francisco, CA',
-    terminalId: 'TERM-CYBERHUB-04',
+    terminalId: record.station_id || 'TERM-CYBERHUB-04',
     createdAt: record.upload_timestamp,
     expiresAt: expires.toISOString(),
+    configuredAt: record.configured_at || undefined,
     printedAt: undefined,
     shreddedAt: record.shredded_at || undefined,
     auditTrail: [
@@ -189,6 +265,82 @@ export const api = {
 
         xhr.send(formData);
       });
+    },
+
+    /**
+     * Configure print settings and commit job to PENDING queue
+     */
+    async configure(jobId: string, payload: ConfigureJobPayload): Promise<ConfigureResponse> {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/configure`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          customer_id: payload.customerId,
+          copies: payload.copies,
+          page_range: payload.pageRange,
+          paper_size: payload.paperSize,
+          orientation: payload.orientation,
+          color_mode: payload.colorMode,
+          duplex: payload.duplex,
+          expiration_minutes: payload.expirationMinutes,
+          station_id: payload.stationId || 'TERM-CYBERHUB-04',
+          printer_id: payload.printerId || 'prt-01',
+        })
+      });
+
+      if (!response.ok) {
+        let errorMsg = `Server error ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail) errorMsg = errData.detail;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+
+      const res: ConfigureResponse = await response.json();
+
+      // Update memory cache
+      const memIdx = memoryJobs.findIndex(j => j.id === jobId.toLowerCase() || j.jobCode === jobId);
+      if (memIdx !== -1) {
+        const s = res.settings;
+        memoryJobs[memIdx] = {
+          ...memoryJobs[memIdx],
+          copies: s.copies,
+          pageRange: s.page_range,
+          paperSize: s.paper_size as any,
+          orientation: s.orientation,
+          colorMode: s.color_mode,
+          duplex: s.duplex === 'double_sided',
+          selectedPagesCount: s.selected_pages_count,
+          totalSheets: s.total_sheets,
+          totalCost: s.total_cost,
+          ratePerPage: s.rate_per_page,
+          status: 'pending',
+          expiresAt: s.expires_at || memoryJobs[memIdx].expiresAt,
+          qrPayload: s.qr_payload,
+          releasePin: s.release_pin,
+        };
+      }
+
+      return res;
+    },
+
+    /**
+     * Get print settings for a job
+     */
+    async getSettings(jobId: string): Promise<PrintSettingsResponse> {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/settings`);
+      if (!response.ok) {
+        let errorMsg = `Server error ${response.status}`;
+        try {
+          const errData = await response.json();
+          if (errData.detail) errorMsg = errData.detail;
+        } catch {}
+        throw new Error(errorMsg);
+      }
+      return await response.json();
     },
 
     async create(payload: CreateJobPayload): Promise<PrintJob> {

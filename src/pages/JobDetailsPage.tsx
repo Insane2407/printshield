@@ -128,28 +128,62 @@ export const JobDetailsPage: React.FC = () => {
           <Card>
             <CardHeader
               title="Document Information & Print Settings"
-              subtitle="Negotiated job parameters and hardware configuration"
+              subtitle="Negotiated job parameters and station hardware configuration"
             />
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
                 <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <span className="text-slate-500">PAGE COUNT</span>
-                  <div className="text-white text-base font-bold mt-1">{currentJob.pageCount} Pages</div>
+                  <span className="text-slate-500">PAGE SELECTION</span>
+                  <div className="text-white text-base font-bold mt-1">
+                    {currentJob.selectedPagesCount || currentJob.pageCount} / {currentJob.pageCount} Pages
+                  </div>
+                  <div className="text-[10px] text-cyan-400 font-mono mt-0.5">
+                    Range: {currentJob.pageRange || 'all'}
+                  </div>
                 </div>
 
                 <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
                   <span className="text-slate-500">COPIES</span>
-                  <div className="text-white text-base font-bold mt-1">{currentJob.copies} {currentJob.copies > 1 ? 'Copies' : 'Copy'}</div>
+                  <div className="text-white text-base font-bold mt-1">
+                    {currentJob.copies} {currentJob.copies > 1 ? 'Copies' : 'Copy'}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    {currentJob.totalSheets || currentJob.pageCount} Sheets Total
+                  </div>
                 </div>
 
                 <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
                   <span className="text-slate-500">COLOR MODE</span>
-                  <div className="text-cyan-300 text-base font-bold mt-1 capitalize">{currentJob.colorMode.replace('_', ' ')}</div>
+                  <div className="text-cyan-300 text-base font-bold mt-1 capitalize">
+                    {currentJob.colorMode.replace('_', ' ')}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    ${currentJob.colorMode === 'color' ? '0.30' : '0.15'}/page
+                  </div>
                 </div>
 
                 <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <span className="text-slate-500">PAPER FORMAT</span>
-                  <div className="text-white text-base font-bold mt-1">{currentJob.paperSize} ({currentJob.duplex ? 'Duplex' : 'Single-side'})</div>
+                  <span className="text-slate-500">PAPER SIZE</span>
+                  <div className="text-white text-base font-bold mt-1">
+                    {currentJob.paperSize}
+                  </div>
+                  <div className="text-[10px] text-emerald-400 font-mono mt-0.5">
+                    Standard 80 GSM
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <span className="text-slate-500">ORIENTATION</span>
+                  <div className="text-white text-base font-bold mt-1 capitalize">
+                    {currentJob.orientation || 'Portrait'}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
+                  <span className="text-slate-500">DUPLEX MODE</span>
+                  <div className="text-white text-base font-bold mt-1">
+                    {currentJob.duplex ? 'Double-sided' : 'Single-sided'}
+                  </div>
                 </div>
 
                 <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
@@ -157,14 +191,14 @@ export const JobDetailsPage: React.FC = () => {
                   <div className="text-white text-base font-bold mt-1">{formatBytes(currentJob.fileSizeBytes)}</div>
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800">
-                  <span className="text-slate-500">TOTAL SETTLED COST</span>
+                <div className="p-3 rounded-xl bg-slate-900/60 border border-cyan-500/30">
+                  <span className="text-slate-500">TOTAL COST</span>
                   <div className="text-emerald-400 text-base font-bold mt-1">${currentJob.totalCost.toFixed(2)}</div>
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-xs font-mono text-slate-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <span>Station Terminal: <strong className="text-white">{currentJob.cybercafeName} ({currentJob.terminalId || 'Station 04'})</strong></span>
+                <span>Station Terminal: <strong className="text-white">{currentJob.cybercafeName} ({currentJob.terminalId || 'TERM-CYBERHUB-04'})</strong></span>
                 <span className="text-amber-400 font-semibold">Expires at {formatTimestamp(currentJob.expiresAt)}</span>
               </div>
             </CardContent>

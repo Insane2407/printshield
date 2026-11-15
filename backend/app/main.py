@@ -3,14 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import engine, Base, get_db
+from .database import engine, Base, get_db, ensure_schema_migrations
 from .models import PrintJob
 from .routers import jobs
 from .security.encryption import encryption_manager
 from .security.validator import calculate_sha256
 
-# Initialize SQLite database schema
+# Initialize SQLite database schema and migrate missing columns
 Base.metadata.create_all(bind=engine)
+ensure_schema_migrations(engine)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

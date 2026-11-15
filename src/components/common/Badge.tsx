@@ -1,6 +1,6 @@
 import React from 'react';
 import { JobStatus } from '../../types';
-import { ShieldCheck, Flame, RefreshCw, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, Flame, RefreshCw, Clock, CheckCircle2, AlertTriangle, Lock } from 'lucide-react';
 
 interface BadgeProps {
   status?: JobStatus;
@@ -28,6 +28,27 @@ export const Badge: React.FC<BadgeProps> = ({
   // If status is provided, map to security styling
   if (status) {
     switch (status) {
+      case 'encrypted':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.15)] ${sizeClasses[size]} ${className}`}>
+            {icon && <Lock className="w-3 h-3 text-indigo-400" />}
+            ENCRYPTED (AWAITING CONFIG)
+          </span>
+        );
+      case 'pending':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)] ${sizeClasses[size]} ${className}`}>
+            {icon && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+            PENDING (CONFIRMED)
+          </span>
+        );
+      case 'authorized':
+        return (
+          <span className={`inline-flex items-center font-mono font-medium rounded-full bg-teal-950/60 border border-teal-500/40 text-teal-300 shadow-[0_0_10px_rgba(20,184,166,0.15)] ${sizeClasses[size]} ${className}`}>
+            {icon && <ShieldCheck className="w-3 h-3 text-teal-400" />}
+            AUTHORIZED (AT KIOSK)
+          </span>
+        );
       case 'ready':
         return (
           <span className={`inline-flex items-center font-mono font-medium rounded-full bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)] ${sizeClasses[size]} ${className}`}>

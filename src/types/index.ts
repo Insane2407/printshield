@@ -13,8 +13,11 @@ export interface User {
 }
 
 export type JobStatus = 
-  | 'ready'       // Client encrypted, ready for kiosk QR scan
-  | 'queued'      // Operator scanned QR/PIN, in printer memory spool
+  | 'encrypted'   // AES-256-GCM encrypted, awaiting customer configuration
+  | 'pending'     // Configured & confirmed by customer, ready for kiosk QR scan
+  | 'authorized'  // Operator scanned QR/PIN, verified
+  | 'ready'       // Ready for release
+  | 'queued'      // In printer hardware queue
   | 'printing'    // Active hardware print in progress
   | 'completed'   // Printed physically, awaiting cleanup
   | 'shredded'    // DoD 5220.22-M memory sanitization complete
@@ -44,6 +47,14 @@ export interface PrintJob {
   colorMode: 'black_and_white' | 'color';
   paperSize: 'A4' | 'Letter' | 'Legal';
   duplex: boolean;
+  pageRange?: string;
+  selectedPagesCount?: number;
+  totalSheets?: number;
+  orientation?: 'portrait' | 'landscape';
+  ratePerPage?: number;
+  stationId?: string;
+  printerId?: string;
+  configuredAt?: string;
   totalCost: number;
   status: JobStatus;
   cleanupStatus: CleanupStatus;
